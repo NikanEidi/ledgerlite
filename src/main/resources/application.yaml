@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: ledgerlite
+  datasource:
+    url: jdbc:postgresql://localhost:5433/ledgerlite
+    username: ledgerlite
+    password: ${DB_PASSWORD:ledgerlite}
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

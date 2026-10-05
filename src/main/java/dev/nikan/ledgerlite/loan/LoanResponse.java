@@ -16,7 +16,7 @@ public record LoanResponse(
     public static LoanResponse from(LoanApplication loan) {
         return new LoanResponse(
                 loan.getId(),
-                loan.getRequestedAmount(),
+                loan.getRequestedAmount().setScale(4),
                 loan.getStatus(),
                 loan.getCreditScore(),
                 loan.getCreatedAt(),

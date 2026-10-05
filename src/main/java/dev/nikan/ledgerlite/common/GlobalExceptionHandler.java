@@ -6,6 +6,7 @@ import dev.nikan.ledgerlite.account.RecipientAccountNotFoundException;
 import dev.nikan.ledgerlite.account.SameAccountTransferException;
 import dev.nikan.ledgerlite.auth.EmailAlreadyUsedException;
 import dev.nikan.ledgerlite.auth.InvalidCredentialsException;
+import dev.nikan.ledgerlite.loan.LoanNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -34,6 +35,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(RecipientAccountNotFoundException.class)
     public ProblemDetail handleRecipientNotFound(RecipientAccountNotFoundException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(LoanNotFoundException.class)
+    public ProblemDetail handleLoanNotFound(LoanNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 

@@ -1,6 +1,9 @@
 package dev.nikan.ledgerlite.common;
 
 import dev.nikan.ledgerlite.account.AccountNotFoundException;
+import dev.nikan.ledgerlite.account.InsufficientFundsException;
+import dev.nikan.ledgerlite.account.RecipientAccountNotFoundException;
+import dev.nikan.ledgerlite.account.SameAccountTransferException;
 import dev.nikan.ledgerlite.auth.EmailAlreadyUsedException;
 import dev.nikan.ledgerlite.auth.InvalidCredentialsException;
 import org.springframework.http.HttpStatus;
@@ -27,6 +30,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AccountNotFoundException.class)
     public ProblemDetail handleAccountNotFound(AccountNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(RecipientAccountNotFoundException.class)
+    public ProblemDetail handleRecipientNotFound(RecipientAccountNotFoundException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(InsufficientFundsException.class)
+    public ProblemDetail handleInsufficientFunds(InsufficientFundsException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+    }
+
+    @ExceptionHandler(SameAccountTransferException.class)
+    public ProblemDetail handleSameAccount(SameAccountTransferException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

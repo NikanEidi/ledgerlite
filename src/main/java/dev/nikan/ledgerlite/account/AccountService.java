@@ -7,7 +7,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.math.BigDecimal;
 
 @Service
 public class AccountService {
@@ -16,10 +18,14 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final UserRepository userRepository;
+    private final TransferRepository transferRepository;
 
-    public AccountService(AccountRepository accountRepository, UserRepository userRepository) {
+    public AccountService(AccountRepository accountRepository,
+                          UserRepository userRepository,
+                          TransferRepository transferRepository) {
         this.accountRepository = accountRepository;
         this.userRepository = userRepository;
+        this.transferRepository = transferRepository;
     }
 
     @Transactional
@@ -40,6 +46,63 @@ public class AccountService {
     public Account getAccount(String ownerEmail, UUID accountId) {
         User owner = findUserByEmail(ownerEmail);
         return accountRepository.findByIdAndOwnerId(accountId, owner.getId())
+                .orElseThrow(() -> new AccountNotFoundException(accountId));
+    }
+
+    @Transactional
+    public Transfer transfer(String initiatorEmail, UUID fromAccountId,
+                             String idempotencyKey, TransferRequest request) {
+        User initiator = findUserByEmail(initiatorEmail);
+
+        Optional<Transfer> previous = transferRepository
+                .findByInitiatorIdAndIdempotencyKey(initiator.getId(), idempotencyKey);
+        if (previous.isPresent()) {
+            return previous.get();
+        }
+
+        Account recipientPreview = accountRepository.findByAccountNumber(request.toAccountNumber())
+                .orElseThrow(() -> new RecipientAccountNotFoundException(request.toAccountNumber()));
+
+        UUID toAccountId = recipientPreview.getId();
+        if (toAccountId.equals(fromAccountId)) {
+            throw new SameAccountTransferException(fromAccountId);
+        }
+
+        UUID firstId = fromAccountId.compareTo(toAccountId) < 0 ? fromAccountId : toAccountId;
+        UUID secondId = firstId.equals(fromAccountId) ? toAccountId : fromAccountId;
+
+        Account first = lockAccount(firstId);
+        Account second = lockAccount(secondId);
+
+        Account from = first.getId().equals(fromAccountId) ? first : second;
+        Account to = first.getId().equals(fromAccountId) ? second : first;
+
+        if (!from.getOwner().getId().equals(initiator.getId())) {
+            throw new AccountNotFoundException(fromAccountId);
+        }
+
+        from.debit(request.amount());
+        to.credit(request.amount());
+
+        Transfer transfer = new Transfer(initiator, from, to, request.amount(), idempotencyKey);
+        return transferRepository.save(transfer);
+    }
+
+    @Transactional
+    public Account deposit(String ownerEmail, UUID accountId, BigDecimal amount) {
+        User owner = findUserByEmail(ownerEmail);
+
+        Account account = lockAccount(accountId);
+        if (!account.getOwner().getId().equals(owner.getId())) {
+            throw new AccountNotFoundException(accountId);
+        }
+
+        account.credit(amount);
+        return account;
+    }
+
+    private Account lockAccount(UUID accountId) {
+        return accountRepository.findByIdForUpdate(accountId)
                 .orElseThrow(() -> new AccountNotFoundException(accountId));
     }
 

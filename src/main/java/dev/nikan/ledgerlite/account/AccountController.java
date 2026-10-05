@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -46,5 +47,14 @@ public class AccountController {
                                                       @PathVariable UUID id) {
         Account account = accountService.getAccount(jwt.getSubject(), id);
         return ResponseEntity.ok(AccountResponse.from(account));
+    }
+
+    @PostMapping("/{id}/transfers")
+    public ResponseEntity<TransferResponse> transfer(@AuthenticationPrincipal Jwt jwt,
+                                                     @PathVariable UUID id,
+                                                     @RequestHeader("Idempotency-Key") String idempotencyKey,
+                                                     @Valid @RequestBody TransferRequest request) {
+        Transfer transfer = accountService.transfer(jwt.getSubject(), id, idempotencyKey, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(TransferResponse.from(transfer));
     }
 }

@@ -1,18 +1,21 @@
 # Learning Notes
 
-Study notes for each module of LedgerLite. Each lesson covers one concept and follows the same pattern:
+These notes teach the ideas behind LedgerLite, one concept at a time. Each lesson shows the idea, why it matters, the code from this project that applies it, a common mistake, and an interview sentence.
 
-- **Idea**: what the concept means in plain words.
-- **Why it matters**: the problem it prevents.
-- **Code**: the snippet from this project that applies it.
-- **Common mistake**: what goes wrong without it.
-- **Interview line**: a sentence you can say out loud.
+Read the modules in this order. Each one builds on the ideas of the previous one.
 
-The notes are meant to be read in order inside each module, but each lesson stands alone.
+| # | Module | Notes | Lessons | Main ideas |
+|---|---|---|---|---|
+| 1 | Auth | [01-auth.md](01-auth.md) | 9 | layers, DTOs, validation, hashing, JWT, security chain, error format |
+| 2 | Accounts and money | [02-accounts.md](02-accounts.md) | 14 | exact money, ownership, locking, deadlock prevention, idempotency |
+| 3 | Loans | [03-loans.md](03-loans.md) | 8 | state machines, interfaces for external services, one transaction |
+| 4 | Testing | [04-testing.md](04-testing.md) | 9 | unit vs integration tests, Testcontainers, MockMvc |
 
-| Module | Notes | Lessons |
-|---|---|---|
-| Auth | [01-auth.md](01-auth.md) | 8 |
-| Accounts | [02-accounts.md](02-accounts.md) | 9 |
+## How to use these notes
 
-For the technical reference that matches the same code, see [docs](../docs/README.md).
+1. Read one lesson at a time. Do not try to memorize the whole file.
+2. Open the code that the lesson names, and find the line in the project.
+3. Read the "common mistake" first. It shows what the lesson protects you from.
+4. Say the interview sentence out loud. If it is hard to say, reread the idea.
+
+For the technical reference, which describes the same code in more detail with diagrams, see [docs](../docs/README.md).

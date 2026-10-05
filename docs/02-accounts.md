@@ -1,37 +1,44 @@
 # Accounts Module: Technical Reference
 
-**Status:** Opening, listing, and reading accounts are done and tested. Balance changes (deposit, withdraw, transfer) are planned.
+**Status:** Done and covered by tests. Accounts, deposits, withdrawals, and transfers work end to end.
 **Packages:** `account`, with dependencies on `user` and `common`
 
-This document describes the Accounts module as it currently exists. For a step-by-step explanation intended for learning, see [learning/02-accounts.md](../learning/02-accounts.md).
+This document describes the accounts module: opening accounts, reading them, changing balances (deposit, withdrawal, transfer), and the rules that keep money correct. For a step-by-step explanation of the same code, see [learning/02-accounts.md](../learning/02-accounts.md).
 
 ---
 
 ## 1. Responsibilities
 
-- Open a bank account for the authenticated user.
-- List the authenticated user's accounts.
-- Return one account by ID, but only if it belongs to the authenticated user.
-- Store money as exact decimal values, never as floating-point numbers.
-- Enforce ownership, uniqueness, and non-negative balances in the database.
+- Open a `CHECKING` or `SAVINGS` account for the authenticated user.
+- List the user's accounts and read one of them.
+- Deposit money into an owned account.
+- Withdraw money from an owned account, only if the balance covers it.
+- Transfer money from an owned account to any account by its number, exactly once per idempotency key.
+- Store money as exact decimals and enforce non-negative balances in the database.
 
 ## 2. Endpoints
 
-All endpoints require a bearer token. The owner is always taken from the token's subject, never from the request.
+All endpoints require a bearer token. The owner is always taken from the token's subject, never from the request body.
 
-| Method | Path | Request body | Success | Failure cases |
+| Method | Path | Request | Success | Failure cases |
 |---|---|---|---|---|
-| POST | `/accounts` | `{"type": "CHECKING" or "SAVINGS"}` | `201 Created`, plain text `Account opened: <number>` | `400` invalid type, `401` no token |
-| GET | `/accounts` | none | `200 OK`, JSON array of `AccountResponse` | `401` no token |
-| GET | `/accounts/{id}` | none | `200 OK`, one `AccountResponse` | `404` not found or not owned, `401` no token |
+| POST | `/accounts` | `{"type": "CHECKING"}` or `"SAVINGS"` | `201`, plain text `Account opened: <number>` | `400` invalid type, `401` no token |
+| GET | `/accounts` | none | `200`, JSON array of `AccountResponse` | `401` no token |
+| GET | `/accounts/{id}` | none | `200`, `AccountResponse` | `404` not found or not owned, `401` |
+| POST | `/accounts/{id}/deposits` | `{"amount": 500.00}` | `200`, updated `AccountResponse` | `400` invalid amount, `404` not owned, `401` |
+| POST | `/accounts/{id}/withdrawals` | `{"amount": 50.00}` | `200`, updated `AccountResponse` | `400` invalid amount, `404` not owned, `422` insufficient funds, `401` |
+| POST | `/accounts/{id}/transfers` | `{"toAccountNumber": "...", "amount": 100.00}` plus header `Idempotency-Key` | `201`, `TransferResponse` | `400` same account or missing key, `404` recipient or source not found, `422` insufficient funds, `401` |
 
-Note: the POST response is currently plain text. Changing it to return an `AccountResponse` JSON body is a planned improvement.
+Note: the account-opening response is plain text. See [05-limitations-and-roadmap.md](05-limitations-and-roadmap.md).
 
 ## 3. Data model
 
 ```mermaid
 erDiagram
     APP_USER ||--o{ ACCOUNT : "owns"
+    APP_USER ||--o{ TRANSFER : "initiates"
+    ACCOUNT ||--o{ TRANSFER : "debited in (from_account_id)"
+    ACCOUNT ||--o{ TRANSFER : "credited in (to_account_id)"
 
     APP_USER {
         UUID id PK
@@ -44,24 +51,38 @@ erDiagram
 
     ACCOUNT {
         UUID id PK
-        UUID owner_id FK "references app_user.id"
+        UUID owner_id FK
         VARCHAR account_number UK "10 digits"
         VARCHAR type "CHECKING or SAVINGS"
-        NUMERIC balance "numeric(19,4), CHECK balance >= 0"
+        NUMERIC balance "NUMERIC(19,4), CHECK balance >= 0"
+        TIMESTAMPTZ created_at
+    }
+
+    TRANSFER {
+        UUID id PK
+        UUID initiator_id FK
+        UUID from_account_id FK
+        UUID to_account_id FK
+        NUMERIC amount "NUMERIC(19,4), CHECK amount > 0"
+        VARCHAR idempotency_key "unique per initiator"
         TIMESTAMPTZ created_at
     }
 ```
 
-Migration: `src/main/resources/db/migration/V2__create_account.sql`.
+Migrations: `V2__create_account.sql` and `V3__create_transfer.sql`.
 
-| Constraint | Column | What it guarantees |
+### Constraints that protect the data
+
+| Table | Constraint | What it guarantees |
 |---|---|---|
-| Primary key | `account.id` | Each account has one unique identifier |
-| Foreign key | `account.owner_id` | An account always points to an existing user |
-| Unique | `account.account_number` | No two accounts share a number |
-| Check | `account.type` | Only the two allowed types are stored |
-| Check | `account.balance` | The balance can never be negative |
-| Index | `account.owner_id` | Listing one user's accounts is fast |
+| `account` | primary key on `id` | each account has one identifier |
+| `account` | foreign key `owner_id` | an account always belongs to an existing user |
+| `account` | unique `account_number` | no two accounts share a number |
+| `account` | check `type` | only `CHECKING` or `SAVINGS` |
+| `account` | check `balance >= 0` | a balance can never be negative, even if the code has a bug |
+| `transfer` | check `amount > 0` | zero or negative transfers are impossible |
+| `transfer` | check `from_account_id <> to_account_id` | an account cannot transfer to itself |
+| `transfer` | unique `(initiator_id, idempotency_key)` | a retried request cannot create a second transfer |
 
 ## 4. Component structure
 
@@ -75,30 +96,38 @@ flowchart TB
         SVC["AccountService"]
     end
     subgraph data["Data layer"]
-        AR["AccountRepository"]
+        AR["AccountRepository<br/>includes pessimistic lock"]
+        TR["TransferRepository"]
         UR["UserRepository"]
-        ACC["Account entity"]
-        USR["User entity"]
     end
-    subgraph dto["DTOs"]
-        REQ["OpenAccountRequest"]
-        RES["AccountResponse"]
+    subgraph model["Domain model"]
+        ACC["Account<br/>debit and credit rules"]
+        TRF["Transfer"]
+        TYPE["AccountType"]
+    end
+    subgraph dto["DTOs (records)"]
+        OAR["OpenAccountRequest"]
+        DR["DepositRequest"]
+        WR["WithdrawRequest"]
+        TREQ["TransferRequest"]
+        AREP["AccountResponse"]
+        TRES["TransferResponse"]
     end
 
     CTRL --> SVC
-    CTRL --> REQ
-    CTRL --> RES
+    CTRL --> dto
     SVC --> AR
+    SVC --> TR
     SVC --> UR
     AR --> ACC
-    UR --> USR
-    ACC --> USR
-    CTRL -. "throws to" .-> GEH
+    TR --> TRF
+    ACC --> TYPE
+    CTRL -. "exceptions go to" .-> GEH
 ```
 
 ## 5. Sequence diagrams
 
-### 5.1 Open an account
+### 5.1 Deposit
 
 ```mermaid
 sequenceDiagram
@@ -106,114 +135,144 @@ sequenceDiagram
     participant C as Client
     participant CTRL as AccountController
     participant SVC as AccountService
-    participant UR as UserRepository
     participant AR as AccountRepository
+    participant ACC as Account
     participant DB as PostgreSQL
 
-    C->>CTRL: POST /accounts (Bearer token, type)
-    CTRL->>CTRL: validate type is not null
-    CTRL->>SVC: openAccount(jwt.subject, type)
-    SVC->>UR: findByEmail(email)
-    UR->>DB: SELECT app_user
-    DB-->>UR: User
-    SVC->>SVC: generate 10-digit account number
-    SVC->>AR: save(new Account(owner, number, type))
-    AR->>DB: INSERT INTO account
-    DB-->>AR: row with generated id
-    SVC-->>CTRL: Account
-    CTRL-->>C: 201 Created, "Account opened: number"
+    C->>CTRL: POST /accounts/{id}/deposits {amount}
+    CTRL->>SVC: deposit(email, id, amount)
+    SVC->>AR: findByIdForUpdate(id) with row lock
+    AR->>DB: SELECT ... FOR UPDATE
+    DB-->>AR: account row (locked)
+    SVC->>SVC: check owner matches caller
+    SVC->>ACC: credit(amount)
+    Note over ACC: balance = balance + amount
+    SVC-->>CTRL: Account (flushed on commit)
+    CTRL-->>C: 200 OK, AccountResponse
 ```
 
-### 5.2 List my accounts
+### 5.2 Withdrawal
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant C as Client
-    participant CTRL as AccountController
     participant SVC as AccountService
-    participant UR as UserRepository
     participant AR as AccountRepository
+    participant ACC as Account
 
-    C->>CTRL: GET /accounts (Bearer token)
-    CTRL->>SVC: listAccounts(jwt.subject)
-    SVC->>UR: findByEmail(email)
-    UR-->>SVC: User
-    SVC->>AR: findByOwnerId(user.id)
-    AR-->>SVC: List of Account
-    SVC-->>CTRL: List of Account
-    CTRL->>CTRL: map each Account to AccountResponse
-    CTRL-->>C: 200 OK, JSON array
-```
-
-### 5.3 Read one account (ownership check)
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as Client
-    participant CTRL as AccountController
-    participant SVC as AccountService
-    participant UR as UserRepository
-    participant AR as AccountRepository
-    participant GEH as GlobalExceptionHandler
-
-    C->>CTRL: GET /accounts/{id} (Bearer token)
-    CTRL->>SVC: getAccount(jwt.subject, id)
-    SVC->>UR: findByEmail(email)
-    UR-->>SVC: User
-    SVC->>AR: findByIdAndOwnerId(id, user.id)
-    alt account exists and belongs to user
-        AR-->>SVC: Account
-        SVC-->>CTRL: Account
-        CTRL-->>C: 200 OK, AccountResponse
-    else not found or owned by someone else
-        AR-->>SVC: empty
-        SVC-->>CTRL: AccountNotFoundException
-        CTRL-->>GEH: exception
-        GEH-->>C: 404 Not Found, ProblemDetail
+    C->>SVC: withdraw(email, id, amount)
+    SVC->>AR: findByIdForUpdate(id)
+    SVC->>SVC: check owner matches caller
+    SVC->>ACC: debit(amount)
+    alt balance is below amount
+        ACC-->>SVC: InsufficientFundsException
+        Note over SVC: transaction rolls back, nothing saved
+        SVC-->>C: 422 Unprocessable Content
+    else balance is enough
+        ACC-->>SVC: balance reduced
+        SVC-->>C: 200 OK, AccountResponse
     end
 ```
 
-The query uses both `id` and `owner_id` in one `WHERE` clause. A user who guesses another user's account ID receives the same `404` as for an ID that does not exist.
+### 5.3 Transfer (with locking and idempotency)
 
-## 6. Error handling
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant SVC as AccountService
+    participant TR as TransferRepository
+    participant AR as AccountRepository
+    participant DB as PostgreSQL
 
-| Exception | Handler | HTTP status | Raised when |
-|---|---|---|---|
-| `AccountNotFoundException` | `GlobalExceptionHandler` | 404 | account missing or not owned by the caller |
-| `MethodArgumentNotValidException` | `GlobalExceptionHandler` | 400 | `type` is missing or not `CHECKING` or `SAVINGS` |
-| `IllegalStateException` | none yet | 500 | the authenticated user is missing from the database |
+    C->>SVC: transfer(email, fromId, key, {toAccountNumber, amount})
+    SVC->>TR: findByInitiatorIdAndIdempotencyKey(user, key)
+    alt key already used
+        TR-->>SVC: existing Transfer
+        SVC-->>C: 201 with the same TransferResponse (no money moved)
+    else key is new
+        SVC->>AR: findByAccountNumber(toAccountNumber)
+        alt recipient not found
+            SVC-->>C: 404 Not Found
+        else recipient found
+            SVC->>SVC: reject if same account (400)
+            SVC->>AR: lock both accounts in ascending id order
+            AR->>DB: SELECT ... FOR UPDATE (first id)
+            AR->>DB: SELECT ... FOR UPDATE (second id)
+            SVC->>SVC: check source belongs to caller
+            SVC->>SVC: from.debit(amount)
+            alt funds insufficient
+                SVC-->>C: 422, transaction rolls back
+            else funds enough
+                SVC->>SVC: to.credit(amount)
+                SVC->>TR: save(new Transfer)
+                TR->>DB: INSERT INTO transfer
+                SVC-->>C: 201 Created, TransferResponse
+            end
+        end
+    end
+```
 
-The last row is a known gap. It occurs only if a valid token refers to a user that was deleted after the token was issued.
+## 6. Why locking is needed and how it is ordered
 
-## 7. Money representation
+Two transfers can run at the same time. Without locks, both could read the same balance, both see enough money, and both withdraw it. The balance would then be wrong.
+
+`PESSIMISTIC_WRITE` locks a row until the transaction ends. Any other transaction that wants the same row waits.
+
+Locking two accounts creates a new risk, a **deadlock**:
+
+```mermaid
+flowchart LR
+    subgraph T1["Transaction 1: A to B"]
+        t1a["lock A"] --> t1b["wait for B"]
+    end
+    subgraph T2["Transaction 2: B to A"]
+        t2a["lock B"] --> t2b["wait for A"]
+    end
+    t1b -. "held by" .-> t2a
+    t2b -. "held by" .-> t1a
+```
+
+The fix is one global order. The service always locks the account with the smaller UUID first, whatever the direction of the transfer. Both transactions then want the same first lock, so one waits for the other instead of both waiting forever.
+
+## 7. Error handling
+
+| Exception | HTTP status | Raised when |
+|---|---|---|
+| `AccountNotFoundException` | 404 | the account does not exist, or belongs to someone else |
+| `RecipientAccountNotFoundException` | 404 | no account has the destination number |
+| `InsufficientFundsException` | 422 | a debit would make the balance negative |
+| `SameAccountTransferException` | 400 | source and destination are the same account |
+| `MethodArgumentNotValidException` | 400 | an amount is missing, zero, negative, or the type is invalid |
+
+A foreign account returns `404`, the same as a missing one. A user who guesses another account's ID learns nothing.
+
+## 8. Money representation
 
 | Layer | Type | Reason |
 |---|---|---|
-| Database | `NUMERIC(19,4)` | Exact decimal with 4 places |
-| Java | `BigDecimal` | Exact arithmetic |
-| JSON | decimal number, shown as `0.0000` | Keeps the fixed scale |
-| Forbidden | `double`, `float` | Binary floating point cannot represent `0.1` exactly |
+| Database | `NUMERIC(19,4)` | exact decimal, 4 places after the point |
+| Java | `BigDecimal` | exact arithmetic, no binary rounding |
+| JSON response | decimal, scaled to 4 places | the same format everywhere (`setScale(4)`) |
+| Forbidden | `double`, `float` | `0.1` cannot be represented exactly in binary |
 
-## 8. Design decisions
+## 9. Design decisions
 
 | Decision | Reason |
 |---|---|
-| Owner comes from the JWT subject | The client cannot open an account for another user |
-| Account number generated on the server | The client cannot choose or guess numbers |
-| `SecureRandom` for account numbers | Numbers are hard to predict |
-| `findByIdAndOwnerId` | Ownership is enforced in the query, not in code after the fetch |
-| `404` for foreign accounts | Hides whether another user's account exists |
-| `updatable = false` on owner, number, type | An account cannot change owner or type after creation |
-| `balance` has no setter | Balance changes only through domain methods (planned) |
-| `@Transactional(readOnly = true)` on reads | Signals read-only work to the database and to Hibernate |
-| `FetchType` left at default for `owner` | Documented as a possible optimization (see Known limits) |
+| Owner comes from the JWT subject | a client cannot act on another user's account |
+| Account number generated on the server | the client cannot choose or guess numbers |
+| `SecureRandom` for account numbers | numbers are hard to predict |
+| Ownership checked in the query or right after locking | a non-owner never gets a usable balance |
+| Balance rules live in `Account.debit` and `credit` | no code path can change a balance around the rule |
+| No setter for `balance` | the only ways to change it are the named methods |
+| Pessimistic lock on transfers | the simplest correct choice when the same account is written by many requests |
+| Lock order by UUID | prevents deadlock between opposite transfers |
+| Idempotency key stored per initiator | a retry returns the original result, and two users cannot collide |
+| `@Transactional` on every money method | a failure in the middle rolls back everything |
+| `updatable = false` on owner, number, type, amounts of transfers | immutable facts stay immutable |
 
-## 9. Known limits
+## 10. Scope and limitations
 
-- **Account number collisions.** A duplicate number is rejected by the `UNIQUE` constraint, but the code does not retry. A user would see a `500` in that rare case.
-- **Eager loading of owner.** `@ManyToOne` defaults to eager fetching. Switching to `FetchType.LAZY` is planned when list performance matters.
-- **No balance operations yet.** Deposit, withdraw, and transfer are not implemented, so `balance` is always zero.
-- **Concurrency for money.** Balance changes will need locking (optimistic with `@Version`, or pessimistic) before transfers are added.
-- **Plain-text open response.** The POST response will become a JSON `AccountResponse`.
+Features that are not implemented, and behaviors that are known to be incomplete, are listed in one place: [05-limitations-and-roadmap.md](05-limitations-and-roadmap.md), section 2.

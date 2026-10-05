@@ -16,6 +16,7 @@ The technical reference for the same module is in [docs/01-auth.md](../docs/01-a
 | 6 | Tokens (JWT) | `JwtService`, `JwtProperties` |
 | 7 | The security filter chain | `SecurityConfig.securityFilterChain` |
 | 8 | Standard error responses | `GlobalExceptionHandler`, `ProblemDetail` |
+| 9 | Testing authentication | `AccountFlowIntegrationTest` |
 
 ---
 
@@ -215,3 +216,24 @@ public class GlobalExceptionHandler {
 **Common mistake.** Returning `500` for every exception. That tells the client nothing useful and hides validation problems.
 
 **Interview line.** "Errors are mapped centrally in a RestControllerAdvice to RFC 9457 problem details, so every endpoint returns the same error format."
+
+---
+
+## Lesson 9: Testing authentication
+
+**Idea.** An authentication flow is only trusted once a test proves it end to end: register, log in, and call a protected endpoint with the token.
+
+**Code.**
+```java
+@Test
+void protectedEndpointRejectsMissingToken() throws Exception {
+    mvc.perform(get("/accounts"))
+            .andExpect(status().isUnauthorized());
+}
+```
+
+**Why both directions matter.** A test that only checks the success path does not prove that anything is protected. The `401` test proves the lock works.
+
+**Common mistake.** Testing the controller with the security filter turned off. The protection is then never tested.
+
+**Interview line.** "I test authentication through the real security chain, checking both the successful login and the rejection of a missing token."

@@ -1,9 +1,9 @@
 # Auth Module: Technical Reference
 
-**Status:** Done and tested end to end.
+**Status:** Done and covered by tests.
 **Packages:** `auth`, `user`, `config`, `common`
 
-This document describes what the Auth module does, how its parts connect, and why each design decision was made. For a step-by-step explanation intended for learning, see [learning/01-auth.md](../learning/01-auth.md).
+This document describes how authentication works in LedgerLite: registration, login, token issuance, and how protected endpoints check the token. For a step-by-step explanation of the same code, see [learning/01-auth.md](../learning/01-auth.md).
 
 ---
 
@@ -11,9 +11,9 @@ This document describes what the Auth module does, how its parts connect, and wh
 
 - Register a user with an email, a password, and a full name.
 - Store only a BCrypt hash of the password, never the raw password.
-- Log a user in and issue a signed JSON Web Token (JWT) valid for one hour.
+- Log a user in and issue a signed JSON Web Token (JWT) that is valid for one hour.
 - Require a valid bearer token on every endpoint except the public ones.
-- Return all errors as RFC 9457 `application/problem+json` responses.
+- Return every error in the RFC 9457 `application/problem+json` format.
 
 ## 2. Endpoints
 
@@ -21,7 +21,7 @@ This document describes what the Auth module does, how its parts connect, and wh
 |---|---|---|---|---|
 | POST | `/auth/register` | Public | `201 Created`, body is `UserResponse` | `400` invalid input, `409` email already used |
 | POST | `/auth/login` | Public | `200 OK`, body is `LoginResponse` | `400` invalid input, `401` wrong email or password |
-| GET | `/auth/me` | Bearer token | `200 OK`, text with the subject email | `401` missing, malformed, or expired token |
+| GET | `/auth/me` | Bearer token | `200 OK`, plain text with the subject email | `401` missing, malformed, or expired token |
 | GET | `/actuator/health` | Public | `200 OK` | none |
 
 ## 3. Data model
@@ -33,7 +33,7 @@ erDiagram
         VARCHAR email UK "unique, not null"
         VARCHAR password_hash "BCrypt hash, not null"
         VARCHAR full_name "not null"
-        VARCHAR role "CHECK in CUSTOMER, ADMIN"
+        VARCHAR role "CHECK: CUSTOMER or ADMIN"
         TIMESTAMPTZ created_at "default now()"
     }
 ```
@@ -68,7 +68,7 @@ flowchart TB
     JS -. "JwtEncoder and JwtDecoder beans" .-> SC
     SC --> JP
     UR --> U
-    AC -. "throws to" .-> GEH
+    AC -. "exceptions are handled by" .-> GEH
 ```
 
 Solid arrows are direct dependencies (constructor injection). Dashed arrows are beans supplied by Spring.
@@ -88,14 +88,14 @@ sequenceDiagram
     participant DB as PostgreSQL
 
     C->>AC: POST /auth/register {email, password, fullName}
-    AC->>AC: validate @NotBlank @Email @Size
+    AC->>AC: validate with @NotBlank, @Email, @Size
     AC->>AS: register(request)
     AS->>UR: existsByEmail(email)
     UR->>DB: SELECT ... WHERE email = ?
     DB-->>UR: false
     AS->>PE: encode(password)
-    PE-->>AS: bcrypt hash
-    AS->>UR: save(User with role CUSTOMER)
+    PE-->>AS: BCrypt hash
+    AS->>UR: save(new User with role CUSTOMER)
     UR->>DB: INSERT INTO app_user
     AS-->>AC: User
     AC-->>C: 201 Created, UserResponse (no password)
@@ -120,7 +120,7 @@ sequenceDiagram
         AS-->>AC: InvalidCredentialsException
     else email found
         UR-->>AS: User
-        AS->>PE: matches(raw, storedHash)
+        AS->>PE: matches(raw password, stored hash)
         alt password wrong
             AS-->>AC: InvalidCredentialsException
         else password correct
@@ -132,7 +132,7 @@ sequenceDiagram
     end
 ```
 
-Both failure branches return the same error message. This prevents user enumeration.
+Both failure branches return the same message. This prevents user enumeration: an attacker cannot tell which emails are registered.
 
 ### 5.3 Calling a protected endpoint
 
@@ -142,29 +142,31 @@ sequenceDiagram
     participant C as Client
     participant SF as SecurityFilterChain
     participant JD as JwtDecoder
-    participant AC as AuthController
+    participant AC as Controller
 
-    C->>SF: GET /auth/me with Authorization Bearer token
+    C->>SF: request with Authorization: Bearer token
     SF->>JD: verify signature and expiry
-    alt token invalid
+    alt token invalid or missing
         JD-->>SF: failure
         SF-->>C: 401 with WWW-Authenticate error
     else token valid
         JD-->>SF: Jwt (subject, issuer, exp)
-        SF->>AC: request with Jwt principal
+        SF->>AC: request with Jwt as principal
         AC-->>C: 200 OK
     end
 ```
 
+The controller never parses the token itself. It receives an already verified `Jwt` through `@AuthenticationPrincipal`, and uses `jwt.getSubject()` to know who is calling.
+
 ## 6. Error handling
 
-| Exception | Handler | HTTP status | Source |
-|---|---|---|---|
-| `EmailAlreadyUsedException` | `GlobalExceptionHandler` | 409 | `AuthService.register` |
-| `InvalidCredentialsException` | `GlobalExceptionHandler` | 401 | `AuthService.login` |
-| `MethodArgumentNotValidException` | `GlobalExceptionHandler` | 400 | request validation |
+| Exception | HTTP status | Raised when |
+|---|---|---|
+| `EmailAlreadyUsedException` | 409 Conflict | registering an email that already exists |
+| `InvalidCredentialsException` | 401 Unauthorized | unknown email or wrong password |
+| `MethodArgumentNotValidException` | 400 Bad Request | a request field fails validation |
 
-**Why a global handler is needed.** An exception that no handler catches is forwarded by Spring Boot to `/error`. The `/error` path is not on the public list, so the security filter rejects that internal request with a misleading `403`. The global handler catches the exception first, so the forward never happens.
+**Why a global handler is needed.** When no handler catches an exception, Spring Boot forwards the request internally to `/error`. That path is not public, so the security filter rejects the forward with a misleading `403`. The global handler catches the exception first, so the forward never happens.
 
 ## 7. Configuration
 
@@ -174,9 +176,9 @@ security:
     secret-key: ${JWT_SECRET_KEY:...local development value...}
 ```
 
-- The key is read by `JwtProperties` through `@ConfigurationProperties`.
-- HS256 requires at least 32 bytes. Production must set `JWT_SECRET_KEY` from the environment.
-- The default in the file is for local development only.
+- `JwtProperties` reads the key through `@ConfigurationProperties`.
+- HS256 needs at least 32 bytes.
+- The default value is for local development only. Production must set `JWT_SECRET_KEY` in the environment.
 
 ## 8. Token format
 
@@ -185,7 +187,7 @@ security:
 | `iss` | `ledgerlite` |
 | `sub` | user email |
 | `iat` | issue time |
-| `exp` | issue time plus 1 hour |
+| `exp` | issue time plus one hour |
 | header `alg` | `HS256` |
 
 ## 9. Design decisions
@@ -194,15 +196,14 @@ security:
 |---|---|
 | UUID primary keys | IDs cannot be guessed or enumerated |
 | BCrypt through `DelegatingPasswordEncoder` | Standard one-way hash. The `{bcrypt}` prefix allows a future algorithm change |
-| Role set on the server | The request body has no `role` field, so a client cannot register as ADMIN |
+| Role set on the server | The request has no role field, so a client cannot register as ADMIN |
 | Same message for unknown email and wrong password | Prevents user enumeration |
 | Stateless JWT, CSRF disabled | No cookies or sessions, so CSRF does not apply |
 | Spring's built-in Nimbus JWT support | One fewer third-party dependency |
 | Flyway with `ddl-auto: none` | Schema changes are versioned and reviewed like code |
 | DTOs for input and output | The entity, including `passwordHash`, is never serialized |
-| `ProblemDetail` (RFC 9457) | One error format across the whole API |
+| RFC 9457 `ProblemDetail` | One error format across the whole API |
 
-## 10. Known limits
+## 10. Scope and limitations
 
-- Access tokens cannot be revoked before they expire. A refresh-token flow would be needed for that.
-- The JWT secret in the repository is for local development only.
+Features that are not implemented, and behaviors that are known to be incomplete, are listed in one place: [05-limitations-and-roadmap.md](05-limitations-and-roadmap.md), section 1.

@@ -17,7 +17,7 @@ public record TransferResponse(
                 transfer.getId(),
                 transfer.getFromAccount().getAccountNumber(),
                 transfer.getToAccount().getAccountNumber(),
-                transfer.getAmount(),
+                transfer.getAmount().setScale(4),
                 transfer.getCreatedAt()
         );
     }

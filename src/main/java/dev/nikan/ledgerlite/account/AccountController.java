@@ -49,6 +49,14 @@ public class AccountController {
         return ResponseEntity.ok(AccountResponse.from(account));
     }
 
+    @PostMapping("/{id}/deposits")
+    public ResponseEntity<AccountResponse> deposit(@AuthenticationPrincipal Jwt jwt,
+                                                   @PathVariable UUID id,
+                                                   @Valid @RequestBody DepositRequest request) {
+        Account account = accountService.deposit(jwt.getSubject(), id, request.amount());
+        return ResponseEntity.ok(AccountResponse.from(account));
+    }
+
     @PostMapping("/{id}/transfers")
     public ResponseEntity<TransferResponse> transfer(@AuthenticationPrincipal Jwt jwt,
                                                      @PathVariable UUID id,

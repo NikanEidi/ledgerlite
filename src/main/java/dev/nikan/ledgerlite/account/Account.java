@@ -51,6 +51,17 @@ public class Account {
         this.type = type;
     }
 
+    public void debit(BigDecimal amount) {
+        if (balance.compareTo(amount) < 0) {
+            throw new InsufficientFundsException(id, amount, balance);
+        }
+        this.balance = balance.subtract(amount);
+    }
+
+    public void credit(BigDecimal amount) {
+        this.balance = balance.add(amount);
+    }
+
     public UUID getId() { return id; }
     public User getOwner() { return owner; }
     public String getAccountNumber() { return accountNumber; }

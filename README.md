@@ -1,103 +1,123 @@
 # LedgerLite
 
-A digital-bank core built as a REST API in **Java 21 + Spring Boot 4**, designed the way a real bank's backend would be: layered architecture, hashed credentials, JWT-based auth, versioned database migrations, and standardized error responses.
+A digital-bank core built as a REST API with Java 21 and Spring Boot 4. The design follows how a bank's backend is usually structured: a layered architecture, hashed credentials, token-based authentication, versioned database migrations, row-level ownership checks, and standard error responses.
 
-This is a personal learning project, built step by step (and explained line by line) to go deep on Java + Spring Boot for backend roles at banks and fintechs. Every feature listed as done below is real, working code — not a plan.
+This is a personal project built step by step to practice Java and Spring Boot for backend roles in banking and fintech. Every feature listed as done is implemented and tested.
 
 ## Status
 
 | Module | Status |
 |---|---|
-| **Auth** — register, login, JWT-protected endpoints | ✅ Done |
-| **Accounts** — open account, balance, transaction history | ⏳ Planned |
-| **Transfers** — safe money transfer between accounts | ⏳ Planned |
-| **Loan Applications** — application workflow + partner credit-score client | ⏳ Planned |
+| Auth: register, login, JWT-protected endpoints | Done |
+| Accounts: open, list, read one (with ownership check) | Done |
+| Accounts: deposit, withdraw, balance history | Planned |
+| Transfers between accounts | Planned |
+| Loan applications with a partner credit-score client | Planned |
 
-Full design notes (ERDs, class diagrams, sequence diagrams) live in [`notes/`](notes/README.md).
+## Documentation
+
+- [Technical reference](docs/README.md): architecture, schema, endpoints, sequence diagrams, and design decisions for each module.
+- [Learning notes](learning/README.md): one concept per lesson, with the reason, the code, and common mistakes.
 
 ## Tech stack
 
-- **Java 21**, **Spring Boot 4.1.1**, Maven
-- **Spring Web MVC** — REST controllers
-- **Spring Data JPA** + **Hibernate 7** — persistence
-- **Spring Security** (built-in Nimbus JWT support — no extra JWT library) — authentication & authorization
-- **PostgreSQL** + **Flyway** — versioned schema migrations
-- **Jakarta Bean Validation** — request validation
-- **Docker Compose** — local PostgreSQL
-- **Spring Boot Actuator** — health checks
+- Java 21, Spring Boot 4.1.1, Maven
+- Spring Web MVC for REST controllers
+- Spring Data JPA with Hibernate 7 for persistence
+- Spring Security with the built-in Nimbus JWT support (no extra JWT library)
+- PostgreSQL 17 with Flyway for versioned migrations
+- Jakarta Bean Validation for request validation
+- Docker Compose for the local database
+- Spring Boot Actuator for health checks
 
-## Architecture
-
-Layered, organized by feature (not by technical type):
+## Project structure
 
 ```
-dev.nikan.ledgerlite
-├── auth/      → RegisterRequest, LoginRequest/Response, AuthService, AuthController, JwtService, exceptions
-├── user/      → User (entity), Role (enum), UserRepository
-├── config/    → SecurityConfig (JWT beans, PasswordEncoder, filter chain), JwtProperties
-└── common/    → GlobalExceptionHandler (RFC 9457 ProblemDetail)
+src/main/java/dev/nikan/ledgerlite/
+  auth/       register, login, JWT service, auth DTOs and exceptions
+  account/    Account entity, AccountType, repository, service, controller, DTOs
+  user/       User entity, Role, UserRepository
+  config/     SecurityConfig (JWT beans, password encoder, filter chain), JwtProperties
+  common/     GlobalExceptionHandler (RFC 9457 ProblemDetail responses)
+src/main/resources/
+  application.yaml
+  db/migration/
+    V1__create_app_user.sql
+    V2__create_account.sql
+docs/         technical reference per module
+learning/     learning notes per module
 ```
 
-Each request flows through the same three layers:
+Every request follows the same path through three layers:
 
 ```
-Controller  →  Service  →  Repository
-(HTTP I/O)     (business rules)  (database)
+Controller  ->  Service  ->  Repository  ->  PostgreSQL
+(HTTP)          (rules)      (data access)
 ```
 
-See [`notes/01-auth-module.md`](notes/01-auth-module.md) for the full ERD, class diagram, and sequence diagrams.
+## Security
 
-## Security highlights
+- Passwords are hashed with BCrypt and never stored or logged in plain text.
+- Authentication is stateless: an HS256 JWT valid for one hour, with no server-side sessions.
+- A new user's role is always set to `CUSTOMER` on the server. The registration request has no role field.
+- Login returns the same error for an unknown email and a wrong password.
+- Account ownership is enforced inside the database query. Another user's account returns `404`, the same as a missing account.
+- The database enforces its own rules as well: unique emails, unique account numbers, valid roles and account types, non-negative balances, and foreign keys.
+- Errors use the standard RFC 9457 format and never include stack traces.
 
-- Passwords are hashed with **BCrypt** (`DelegatingPasswordEncoder`) — never stored or logged in plain text.
-- Authentication is **stateless JWT** (HS256, 1-hour expiry) — no server-side sessions.
-- A new user's role is **always hardcoded server-side to `CUSTOMER`** — the registration payload has no `role` field, so privilege escalation at signup is impossible.
-- Login returns the **same generic error** for "email not found" and "wrong password," preventing user-enumeration attacks.
-- The database enforces its own rules too (`UNIQUE` email, `CHECK` on role) — a second line of defense beyond the application code.
-- Errors are returned as standardized [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json` responses, never raw stack traces.
+## Running locally
 
-## Running it locally
-
-**Requirements:** Java 21, Maven (or use the bundled `./mvnw`), Docker.
+Requirements: Java 21, Docker. The Maven wrapper (`./mvnw`) is included.
 
 ```bash
-# 1. Start PostgreSQL
+# 1. Start PostgreSQL (mapped to host port 5433)
 docker compose up -d
 
-# 2. Run the app (Flyway migrations run automatically on startup)
+# 2. Start the application. Flyway runs the migrations on startup.
 ./mvnw spring-boot:run
 ```
 
-The app starts on `http://localhost:8080`.
+The application runs on `http://localhost:8080`.
 
-## API endpoints
+## API
 
-| Method | Path | Auth required | Description |
+All endpoints except the ones marked public require the header `Authorization: Bearer <token>`.
+
+| Method | Path | Access | Description |
 |---|---|---|---|
-| `POST` | `/auth/register` | No | Create a new user account |
-| `POST` | `/auth/login` | No | Log in, receive a JWT |
-| `GET` | `/auth/me` | Yes (`Bearer` token) | Returns the authenticated user's identity |
-| `GET` | `/actuator/health` | No | Health check |
+| POST | `/auth/register` | Public | Create a user |
+| POST | `/auth/login` | Public | Receive an access token |
+| GET | `/auth/me` | Token | Return the authenticated email |
+| POST | `/accounts` | Token | Open a `CHECKING` or `SAVINGS` account |
+| GET | `/accounts` | Token | List the authenticated user's accounts |
+| GET | `/accounts/{id}` | Token | Read one account owned by the user |
+| GET | `/actuator/health` | Public | Health check |
 
-### Example: register
+### Example
 
 ```bash
+# Register
 curl -X POST http://localhost:8080/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"nikan@test.com","password":"password123","fullName":"Nikan Eidi"}'
-```
 
-### Example: log in and call a protected endpoint
-
-```bash
+# Log in and store the token
 TOKEN=$(curl -s -X POST http://localhost:8080/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"nikan@test.com","password":"password123"}' \
   | python3 -c "import sys, json; print(json.load(sys.stdin)['accessToken'])")
 
-curl http://localhost:8080/auth/me -H "Authorization: Bearer $TOKEN"
+# Open a checking account
+curl -X POST http://localhost:8080/accounts \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"CHECKING"}'
+
+# List accounts
+curl http://localhost:8080/accounts -H "Authorization: Bearer $TOKEN"
 ```
 
 ## Author
 
-**Nikan Eidi** — [github.com/NikanEidi](https://github.com/NikanEidi) · [nikanvision.dev](https://nikanvision.dev) · [LinkedIn](https://www.linkedin.com/in/nikan-eidi-03476232b)
+Nikan Eidi
+[github.com/NikanEidi](https://github.com/NikanEidi) · [nikanvision.dev](https://nikanvision.dev) · [LinkedIn](https://www.linkedin.com/in/nikan-eidi-03476232b)

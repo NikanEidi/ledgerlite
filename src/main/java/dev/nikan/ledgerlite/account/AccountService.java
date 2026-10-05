@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.util.List;
 
 @Service
 public class AccountService {
@@ -22,11 +23,21 @@ public class AccountService {
 
     @Transactional
     public Account openAccount(String ownerEmail, AccountType type) {
-        User owner = userRepository.findByEmail(ownerEmail)
-                .orElseThrow(() -> new IllegalStateException("Authenticated user not found: " + ownerEmail));
+        User owner = findUserByEmail(ownerEmail);
 
         Account account = new Account(owner, generateAccountNumber(), type);
         return accountRepository.save(account);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Account> listAccounts(String ownerEmail) {
+        User owner = findUserByEmail(ownerEmail);
+        return accountRepository.findByOwnerId(owner.getId());
+    }
+
+    private User findUserByEmail(String email) {
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalStateException("Authenticated user not found: " + email));
     }
 
     private String generateAccountNumber() {

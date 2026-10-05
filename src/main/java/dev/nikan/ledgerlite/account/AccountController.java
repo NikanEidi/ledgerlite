@@ -6,12 +6,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/accounts")
@@ -37,5 +39,12 @@ public class AccountController {
                 .map(AccountResponse::from)
                 .toList();
         return ResponseEntity.ok(accounts);
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<AccountResponse> getAccount(@AuthenticationPrincipal Jwt jwt,
+                                                      @PathVariable UUID id) {
+        Account account = accountService.getAccount(jwt.getSubject(), id);
+        return ResponseEntity.ok(AccountResponse.from(account));
     }
 }

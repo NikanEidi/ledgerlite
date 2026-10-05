@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class AccountService {
@@ -33,6 +34,13 @@ public class AccountService {
     public List<Account> listAccounts(String ownerEmail) {
         User owner = findUserByEmail(ownerEmail);
         return accountRepository.findByOwnerId(owner.getId());
+    }
+
+    @Transactional(readOnly = true)
+    public Account getAccount(String ownerEmail, UUID accountId) {
+        User owner = findUserByEmail(ownerEmail);
+        return accountRepository.findByIdAndOwnerId(accountId, owner.getId())
+                .orElseThrow(() -> new AccountNotFoundException(accountId));
     }
 
     private User findUserByEmail(String email) {

@@ -101,6 +101,19 @@ public class AccountService {
         return account;
     }
 
+    @Transactional
+    public Account withdraw(String ownerEmail, UUID accountId, BigDecimal amount) {
+        User owner = findUserByEmail(ownerEmail);
+
+        Account account = lockAccount(accountId);
+        if (!account.getOwner().getId().equals(owner.getId())) {
+            throw new AccountNotFoundException(accountId);
+        }
+
+        account.debit(amount);
+        return account;
+    }
+
     private Account lockAccount(UUID accountId) {
         return accountRepository.findByIdForUpdate(accountId)
                 .orElseThrow(() -> new AccountNotFoundException(accountId));

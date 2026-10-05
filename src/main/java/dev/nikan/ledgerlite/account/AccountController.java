@@ -57,6 +57,14 @@ public class AccountController {
         return ResponseEntity.ok(AccountResponse.from(account));
     }
 
+    @PostMapping("/{id}/withdrawals")
+    public ResponseEntity<AccountResponse> withdraw(@AuthenticationPrincipal Jwt jwt,
+                                                    @PathVariable UUID id,
+                                                    @Valid @RequestBody WithdrawRequest request) {
+        Account account = accountService.withdraw(jwt.getSubject(), id, request.amount());
+        return ResponseEntity.ok(AccountResponse.from(account));
+    }
+
     @PostMapping("/{id}/transfers")
     public ResponseEntity<TransferResponse> transfer(@AuthenticationPrincipal Jwt jwt,
                                                      @PathVariable UUID id,

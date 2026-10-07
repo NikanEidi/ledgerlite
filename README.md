@@ -157,7 +157,7 @@ These points are a foundation, not a complete security review. Token revocation,
 2. Complete idempotency: body comparison, concurrent duplicates, deposits and withdrawals.
 3. Double-entry ledger and transaction history.
 4. Loan disbursement through the ledger.
-5. Concurrency tests and continuous integration.
+5. Concurrency tests (parallel transfers, duplicate keys under load).
 
 Full detail: [docs/05-limitations-and-roadmap.md](docs/05-limitations-and-roadmap.md).
 

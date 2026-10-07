@@ -63,7 +63,6 @@ Each item also has a type:
 | High | Not implemented | Loan integration tests | The loan endpoints were verified by hand, not in code. |
 | Medium | Not implemented | Validation error tests | The `400` responses are not asserted in code. |
 | Medium | Not implemented | Test for a reused key with a different body | Covers the known idempotency weakness above. |
-| Medium | Not implemented | Continuous integration | Tests do not run on each push yet. |
 | Medium | Not implemented | Coverage report | No measurement of which code is exercised. JaCoCo would provide it. |
 | Low | Known issue | Mockito runtime warnings | Mockito attaches an agent at runtime. Declaring it as a Maven agent removes the warnings. |
 
@@ -88,6 +87,6 @@ The order below reflects dependencies, not difficulty.
 3. **Double-entry ledger.** One debit and one credit row per movement, plus a transaction history endpoint.
 4. **Loan disbursement.** Approved loans credit a target account through the ledger.
 5. **Concurrency tests.** Parallel transfers, duplicate keys, and deadlock avoidance under load.
-6. **Operations.** Continuous integration, OpenAPI, metrics, and coverage.
+6. **Operations.** OpenAPI, metrics, and coverage. (CI is already in place: tests run on every push and pull request.)
 
 Each step should ship with tests and an update to the matching module document.

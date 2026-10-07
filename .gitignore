@@ -28,3 +28,8 @@ Thumbs.db
 
 # Maven wrapper binary (downloaded at runtime)
 .mvn/wrapper/maven-wrapper.jar
+
+# Kubernetes secrets — real values never committed, even demo ones; see
+# k8s/*.example.yaml for the shape of the file.
+k8s/postgres-secret.yaml
+k8s/app-secret.yaml

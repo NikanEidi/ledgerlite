@@ -7,6 +7,7 @@
 [![Tests](https://img.shields.io/badge/tests-14%20passing-brightgreen?logo=junit5&logoColor=white)](#running-the-tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](compose.yaml)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-ready-326CE5?logo=kubernetes&logoColor=white)](k8s/README.md)
 [![Build](https://img.shields.io/badge/build-Maven-C71A36?logo=apachemaven&logoColor=white)](pom.xml)
 
 **A digital-bank core as a REST API.** Accounts, deposits, withdrawals, idempotent transfers, and loan decisions, built on Java 21 and Spring Boot 4 with a focus on correctness of money, security by default, and a documented, tested design.
@@ -76,6 +77,12 @@ The API is available at `http://localhost:8080`.
 # unit tests only, no Docker needed
 ./mvnw test -Dtest='AccountTest,LoanStatusTest'
 ```
+
+### Running on Kubernetes
+
+The app and Postgres also run on a local `kind` cluster, with a ConfigMap, a Secret, resource limits, and liveness/readiness probes. See [k8s/README.md](k8s/README.md).
+
+Kubernetes fundamentals practiced separately before this deployment: [github.com/NikanEidi/k8s-practice](https://github.com/NikanEidi/k8s-practice).
 
 ## API
 
